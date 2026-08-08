@@ -113,11 +113,49 @@ Nota de la comunidad upstream (issues #176, #178, #196 del repo del driver): en 
 
 ---
 
+## Problema conocido: sin audio después de suspender (deep sleep / S3)
+
+**Síntoma:** el driver está bien instalado (DKMS activo, codec detectado, `dkms status` correcto), pero después de que la máquina despierta de suspender no sale sonido. ALSA y PipeWire se ven completamente normales (sink presente, sin mute, volumen correcto) — el problema no es de configuración ni de drivers rotos, es que **los altavoces se quedan sin programar**.
+
+### Causa raíz
+
+En *deep sleep* (S3) real, el chip CS8409 y los amplificadores (CS42L83) se apagan por completo. Eso borra la configuración I2C/PLL/TDM específica de Apple que el driver aplica una sola vez, al arrancar (`cs_8409_boot_setup()`). La rutina de resume del driver (`cs_8409_apple_resume()`) solo restaura el estado HDA estándar, no ese setup Apple — así que el codec "existe" para ALSA/PipeWire pero los amplificadores quedan mudos hasta reiniciar.
+
+Está documentado y confirmado en el repo del driver: [issue #177](https://github.com/davidjo/snd_hda_macbookpro/issues/177), [issue #90](https://github.com/davidjo/snd_hda_macbookpro/issues/90). Hay un fix en el propio código en camino ([PR #198](https://github.com/davidjo/snd_hda_macbookpro/pull/198)) pero sigue sin mergear al momento de escribir esto.
+
+### Workaround: reiniciar el controlador HDA al despertar
+
+Mientras el PR upstream no se mergea, el workaround confirmado específicamente en iMac (por otro usuario con el mismo hardware, funcionando a diario durante más de un mes) es forzar un unbind/bind del controlador HDA tras el resume — reinicializa el codec desde cero, como si la máquina hubiera arrancado de nuevo. Esto se automatiza con un hook de `systemd-sleep`:
+
+```bash
+./install-resume-fix.sh
+```
+
+Instala `cs8409-resume-fix` en `/usr/lib/systemd/system-sleep/`, que se ejecuta automáticamente cada vez que el sistema despierta de suspender.
+
+Para aplicar el arreglo sin esperar a que se suspenda de nuevo (si ya te quedaste sin audio):
+
+```bash
+sudo /usr/lib/systemd/system-sleep/cs8409-resume-fix post
+```
+
+Para confirmar que el hook corrió en el último resume:
+
+```bash
+journalctl -t cs8409-resume-fix
+```
+
+**Alternativa** si el workaround no fuera suficiente: cambiar el modo de suspensión a `s2idle` (el codec nunca se apaga, así nunca pierde la programación). Como el iMac es de escritorio y no depende de batería, la desventaja habitual de `s2idle` (mayor consumo) no es relevante aquí.
+
+---
+
 ## Archivos en este repositorio
 
 | Archivo | Descripción |
 |---|---|
-| `install-driver-imac181.sh` | Script de instalación automatizada del driver DKMS para kernel 7.0+ (la solución) |
+| `install-driver-imac181.sh` | Script de instalación automatizada del driver DKMS para kernel 7.0+ (la solución al problema principal) |
+| `install-resume-fix.sh` | Instala el hook de systemd-sleep que arregla la pérdida de audio tras deep sleep |
+| `cs8409-resume-fix` | El hook en sí (se copia a `/usr/lib/systemd/system-sleep/`) |
 | `final-diagnosis.sh` | Diagnóstico genérico hardware vs. software (subsystem ID, nodo de conexión, amplificador) |
 | `pipewire-fix.sh` | Utilidad puntual para cuando PipeWire bloquea el audio, independiente del driver CS8409 |
 

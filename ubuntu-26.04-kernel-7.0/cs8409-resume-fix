@@ -1,0 +1,25 @@
+#!/bin/bash
+# systemd-sleep hook: reprograma el CS8409 tras deep sleep (S3).
+#
+# En S3 real el codec CS8409 y los amplificadores CS42L83 se apagan por
+# completo, borrando la configuración I2C/PLL/TDM que el driver Apple solo
+# aplica una vez, al arrancar (cs_8409_boot_setup()). La rutina de resume
+# del driver no vuelve a ejecutar ese setup, así que ALSA/PipeWire quedan
+# "normales" tras despertar pero los altavoces se quedan mudos.
+#
+# Workaround confirmado en iMac (upstream davidjo/snd_hda_macbookpro #90,
+# #177): forzar un unbind/bind del controlador HDA para que reinicialice
+# el codec desde cero, como si la máquina hubiera arrancado de nuevo.
+
+case "$1" in
+    post)
+        for dev in /sys/bus/pci/drivers/snd_hda_intel/0000:*; do
+            [ -e "$dev" ] || continue
+            bdf=$(basename "$dev")
+            logger -t cs8409-resume-fix "reiniciando controlador HDA $bdf tras resume"
+            echo "$bdf" > /sys/bus/pci/drivers/snd_hda_intel/unbind
+            sleep 1
+            echo "$bdf" > /sys/bus/pci/drivers/snd_hda_intel/bind
+        done
+        ;;
+esac
