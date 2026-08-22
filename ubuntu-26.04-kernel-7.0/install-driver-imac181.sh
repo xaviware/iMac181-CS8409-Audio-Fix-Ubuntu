@@ -1,6 +1,8 @@
 #!/bin/bash
 # Instalación del driver CS8409 Apple (snd_hda_macbookpro) vía DKMS
 # iMac 18,1 - Ubuntu 26.04 LTS - Kernel 7.0.x
+# iMac 18,2 - Zorin OS 18.1 - Linux Kernel 7.0.0-28-generic #28~24.04.1-Ubuntu
+
 set -e
 
 DRIVER_DIR="$HOME/snd_hda_macbookpro"
@@ -14,8 +16,35 @@ echo "========================================================="
 echo ""
 echo "[1/5] Instalando dependencias de compilación..."
 KVER_BASE=$(uname -r | cut -d'-' -f1)
-sudo apt update
-sudo apt install -y dkms gcc make "linux-headers-$(uname -r)" "linux-source-${KVER_BASE}"
+
+if [[ -f /etc/os-release ]]; then
+    . /etc/os-release
+    echo "ID:$ID" # "ID:zorin"  Note: lowercase
+    if [ "x$ID" == "xzorin" ]; then
+        ## -- Zorin OS Ubuntu based Linux
+        #sudo apt update
+        #sudo apt install -y dkms gcc make
+
+        echo "- NOTE: Within Zorin OS: Start Software Updater > Settings... > Zorin Software > enable Source code. So that we can download Linux kernel source code."
+
+        ## -- get Linux source code, this expands to "./linux-hwe-7.0-7.0.0/"
+        sudo apt-get source linux-image-unsigned-7.0.0-28-generic
+        #sudo apt-get source linux-image-unsigned-7.0.0-30-generic                
+
+        mv ./linux-hwe-7.0-7.0.0 ./linux-source-7.0.0
+
+        ## create /usr/src/linux-source-7.0.0.tar.bz2 - but only sound module in this source archive
+        ## needed because driver expect sound in "linux-source-7.0.0/sound/hda"
+        sudo tar -C linux-source-7.0.0 -cjf /usr/src/linux-source-7.0.0.tar.bz2  --transform='s,^sound/hda,linux-source-7.0.0/sound/hda,' sound/hda
+
+    fi
+else
+    ## -- assume standard Ubuntu
+    sudo apt update
+    sudo apt install -y dkms gcc make "linux-headers-$(uname -r)" "linux-source-${KVER_BASE}"
+fi
+
+
 
 if ! ls /usr/src/linux-source-*.tar.* >/dev/null 2>&1; then
     echo "⚠️  No se encontró el kernel source en /usr/src. Revisa que 'linux-source-${KVER_BASE}' se haya instalado."
@@ -54,6 +83,9 @@ echo ""
 echo "========================================================="
 echo "  Instalación completa"
 echo "========================================================="
+echo ""
+echo " - You know must have:"
+echo "   /usr/lib/modules/7.0.0-28-generic/updates/dkms/snd-hda-codec-cs409.ko.zst"
 echo ""
 echo "dkms status:"
 dkms status | grep snd_hda_macbookpro || echo "  (aún no aparece - revisa mensajes anteriores)"
